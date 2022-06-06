@@ -332,6 +332,22 @@ namespace Cpp2IL.Core.Utils
                 return result;
             }
 
+            //Maybe it's a nested type
+            var lastDot = name.LastIndexOf(".", StringComparison.Ordinal);
+            if (lastDot != -1)
+            {
+                var declaringType = InternalTryLookupTypeDefByName(name[..lastDot]);
+                if (declaringType.Item1 != null)
+                {
+                    var nestedTypeName = name[(lastDot + 1)..];
+                    var nestedType = declaringType.Item1.NestedTypes.FirstOrDefault(nested => nested.Name == nestedTypeName);
+                    if (nestedType != null)
+                    {
+                        return new Tuple<TypeDefinition?, string[]>(nestedType, declaringType.Item2);
+                    }
+                }
+            }
+
             //Generics are dumb.
             var genericParams = Array.Empty<string>();
             if (definedType == null && name.Contains("<"))
@@ -372,6 +388,25 @@ namespace Cpp2IL.Core.Utils
 
         private static string[] GetGenericParams(string input)
         {
+            var commaSplit = input.Split(',');
+            if (input.StartsWith("(") && commaSplit.Length >= 2)
+            {
+                var b = new StringBuilder();
+                var num = commaSplit.Length;
+                var strs = input[1..^1].Split(',').ToArray();
+                if (strs[0].EndsWith("key"))
+                    strs[0] = strs[0][..^3];
+                if (strs[1].EndsWith("value"))
+                    strs[1] = strs[1][..^5];
+                
+                foreach (var str in strs)
+                {
+                    b.Append(str);
+                }
+
+                return new [] {$"System.ValueTuple`{num}<{string.Join(",", strs)}>"};
+            }
+
             if (!input.Contains('<'))
                 return input.Split(',');
 
