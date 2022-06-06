@@ -162,6 +162,33 @@ namespace Cpp2IL.Core
             {
                 var methodDef = currentlyFixingUp.AsUnmanaged();
 
+                // Some fixes for compiler generated types
+                if (ilTypeDefinition.Name.StartsWith("<"))
+                {
+                    switch (methodDef.Name)
+                    {
+                        case "MoveNext":
+                        {
+                            foreach (var type in ilTypeDefinition.Interfaces.Select(@interface => @interface.InterfaceType).Where(type => type.FullName is "System.Collections.IEnumerator" or "System.Runtime.CompilerServices.IAsyncStateMachine"))
+                            {
+                                currentlyFixingUp.Overrides.Add(ilTypeDefinition.Module.ImportReference(type.Resolve().FindMethod("MoveNext")));
+                            }
+
+                            break;
+                        }
+                        case "SetStateMachine":
+                        {
+                            foreach (var type in ilTypeDefinition.Interfaces.Select(@interface => @interface.InterfaceType).Where(type => type.FullName == "System.Runtime.CompilerServices.IAsyncStateMachine"))
+                            {
+                                currentlyFixingUp.Overrides.Add(ilTypeDefinition.Module.ImportReference(type.Resolve().FindMethod("SetStateMachine")));
+                            }
+
+                            break;
+                        }
+                    }
+                }
+
+
                 //The two StartsWith calls are for a) .ctor / .cctor and b) compiler-generated enumerator methods for these two methods.
                 if (!methodDef.Name!.Contains(".") || methodDef.Name.StartsWith(".") || methodDef.Name.StartsWith("<")) continue;
 
