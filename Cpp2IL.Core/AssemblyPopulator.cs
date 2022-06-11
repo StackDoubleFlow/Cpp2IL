@@ -188,7 +188,6 @@ namespace Cpp2IL.Core
                     }
                 }
 
-
                 //The two StartsWith calls are for a) .ctor / .cctor and b) compiler-generated enumerator methods for these two methods.
                 if (!methodDef.Name!.Contains(".") || methodDef.Name.StartsWith(".") || methodDef.Name.StartsWith("<")) continue;
 
@@ -197,7 +196,7 @@ namespace Cpp2IL.Core
                 var baseMethodName = methodDef.Name[(methodDef.Name.LastIndexOf(".", StringComparison.Ordinal) + 1)..];
 
                 //Unfortunately, the only way we can get these types is by name - there is no metadata reference.
-                var (baseType, genericParamNames) = MiscUtils.TryLookupTypeDefByName(baseMethodType);
+                var (baseType, genericParamNames, _) = MiscUtils.TryLookupTypeDefByName(baseMethodType);
 
                 if (baseType == null)
                 {
@@ -235,10 +234,11 @@ namespace Cpp2IL.Core
 
                     TypeReference? ResolveGenericParameter(string name)
                     {
-                        var (type, gParams) = MiscUtils.TryLookupTypeDefByName(name);
+                        var (type, gParams, isArray) = MiscUtils.TryLookupTypeDefByName(name);
                         if (type == null) 
                             return GenericInstanceUtils.ResolveGenericParameterType(new GenericParameter(name, baseType), ilTypeDefinition);
 
+                        TypeReference typeWithGenerics = type;
                         if (gParams.Length > 0)
                         {
                             var parameterRefs = gParams.Select(ResolveGenericParameter).ToArray();
@@ -246,10 +246,10 @@ namespace Cpp2IL.Core
                             if (parameterRefs.Any(gp => gp == null))
                                 return null;
                             
-                            return ilTypeDefinition.Module.ImportRecursive(type.MakeGenericInstanceType(parameterRefs));
+                            typeWithGenerics = ilTypeDefinition.Module.ImportRecursive(type.MakeGenericInstanceType(parameterRefs));
                         }
-                            
-                        return type;
+
+                        return isArray ? typeWithGenerics.MakeArrayType() : typeWithGenerics;
                     }
 
                     var genericParams = genericParamNames.Select(ResolveGenericParameter).ToList();

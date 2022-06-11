@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -18,7 +18,7 @@ namespace Cpp2IL.Core.Utils
         // ReSharper disable NotNullMemberIsNotInitialized
 
         // ReSharper restore NotNullMemberIsNotInitialized
-        private static readonly Dictionary<string, Tuple<TypeDefinition?, string[]>> CachedTypeDefsByName = new();
+        private static readonly Dictionary<string, Tuple<TypeDefinition?, string[], bool>> CachedTypeDefsByName = new();
 
         private static List<ulong>? _allKnownFunctionStarts;
 
@@ -295,9 +295,9 @@ namespace Cpp2IL.Core.Utils
 
 
         public static TypeDefinition? TryLookupTypeDefKnownNotGeneric(string? name) => TryLookupTypeDefByName(name).Item1;
-        public static Tuple<TypeDefinition?, string[]> TryLookupTypeDefByName(string? name)
+        public static Tuple<TypeDefinition?, string[], bool> TryLookupTypeDefByName(string? name)
         {
-            if (name == null) return new Tuple<TypeDefinition?, string[]>(null, Array.Empty<string>());
+            if (name == null) return new Tuple<TypeDefinition?, string[], bool>(null, Array.Empty<string>(), false);
 
             var key = name.ToLower(CultureInfo.InvariantCulture);
 
@@ -311,10 +311,10 @@ namespace Cpp2IL.Core.Utils
             return result;
         }
 
-        private static Tuple<TypeDefinition?, string[]> InternalTryLookupTypeDefByName(string name)
+        private static Tuple<TypeDefinition?, string[], bool> InternalTryLookupTypeDefByName(string name)
         {
             if (TypeDefinitions.GetPrimitive(name) is {} primitive)
-                return new Tuple<TypeDefinition?, string[]>(primitive, Array.Empty<string>());
+                return new Tuple<TypeDefinition?, string[], bool>(primitive, Array.Empty<string>(), false);
             
             //The only real cases we end up here are:
             //From explicit override resolving, because that has to be done by name
@@ -329,7 +329,7 @@ namespace Cpp2IL.Core.Utils
             {
                 var without = name[..^2];
                 var result = TryLookupTypeDefByName(without);
-                return result;
+                return new Tuple<TypeDefinition?, string[], bool>(result.Item1, result.Item2, true);
             }
 
             //Maybe it's a nested type
@@ -343,7 +343,7 @@ namespace Cpp2IL.Core.Utils
                     var nestedType = declaringType.Item1.NestedTypes.FirstOrDefault(nested => nested.Name == nestedTypeName);
                     if (nestedType != null)
                     {
-                        return new Tuple<TypeDefinition?, string[]>(nestedType, declaringType.Item2);
+                        return new Tuple<TypeDefinition?, string[], bool>(nestedType, declaringType.Item2, declaringType.Item3);
                     }
                 }
             }
@@ -361,20 +361,20 @@ namespace Cpp2IL.Core.Utils
                 definedType = SharedState.AllTypeDefinitions.Find(t => t.FullName == name);
             }
 
-            if (definedType != null) return new Tuple<TypeDefinition?, string[]>(definedType, genericParams);
+            if (definedType != null) return new Tuple<TypeDefinition?, string[], bool>(definedType, genericParams, false);
 
             //It's possible they didn't specify a `System.` prefix
             var searchString = $"System.{name}";
             definedType = SharedState.AllTypeDefinitions.Find(t => string.Equals(t.FullName, searchString, StringComparison.OrdinalIgnoreCase));
 
-            if (definedType != null) return new Tuple<TypeDefinition?, string[]>(definedType, genericParams);
+            if (definedType != null) return new Tuple<TypeDefinition?, string[], bool>(definedType, genericParams, false);
 
             //Still not got one? Ok, is there only one match for non FQN?
             var matches = SharedState.AllTypeDefinitions.Where(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
             if (matches.Count == 1)
                 definedType = matches.First();
 
-            if (definedType != null || !name.Contains(".")) return new Tuple<TypeDefinition?, string[]>(definedType, genericParams);
+            if (definedType != null || !name.Contains(".")) return new Tuple<TypeDefinition?, string[], bool>(definedType, genericParams, false);
 
             searchString = name;
             //Try subclasses
@@ -383,7 +383,7 @@ namespace Cpp2IL.Core.Utils
                 definedType = matches.First();
 
 
-            return new Tuple<TypeDefinition?, string[]>(definedType, genericParams);
+            return new Tuple<TypeDefinition?, string[], bool>(definedType, genericParams, false);
         }
 
         private static string[] GetGenericParams(string input)
