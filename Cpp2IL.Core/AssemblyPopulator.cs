@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -208,7 +208,7 @@ namespace Cpp2IL.Core
                     {
                         var baseMethod = baseType.Resolve().Methods.Single(method => method.Name == baseMethodName);
                         var genericMethod = baseMethod.MakeMethodOnGenericType(baseType.GenericArguments.ToArray());
-                        methodDef.Overrides.Add(ilTypeDefinition.Module.ImportReference(baseMethod, ilTypeDefinition));
+                        methodDef.Overrides.Add(ilTypeDefinition.Module.ImportReference(genericMethod, ilTypeDefinition));
                     }
                     
                     if (enumeratorType != null && (methodDef.Name.StartsWith("System.Collections.IEnumerator") ||
@@ -495,13 +495,37 @@ namespace Cpp2IL.Core
 
                 var methodDefinition = new MethodDefinition(methodDef.Name, (MethodAttributes) methodDef.flags,
                     ilTypeDefinition.Module.ImportReference(TypeDefinitions.Void));
+                ilTypeDefinition.Methods.Add(methodDefinition);
 
                 SharedState.UnmanagedToManagedMethods[methodDef] = methodDefinition;
                 SharedState.ManagedToUnmanagedMethods[methodDefinition] = methodDef;
+                
+                //Handle generic parameters.
+                methodDef.GenericContainer?.GenericParameters.ToList()
+                    .ForEach(p =>
+                    {
+                        if (SharedState.GenericParamsByIndex.TryGetValue(p.Index, out var gp))
+                        {
+                            if (!methodDefinition.GenericParameters.Contains(gp))
+                                methodDefinition.GenericParameters.Add(gp);
 
-                ilTypeDefinition.Methods.Add(methodDefinition);
+                            return;
+                        }
+
+                        gp = new GenericParameter(p.Name, methodDefinition).WithFlags(p.flags);
+                        SharedState.GenericParamsByIndex.Add(p.Index, gp);
+
+                        if (!methodDefinition.GenericParameters.Contains(gp))
+                            methodDefinition.GenericParameters.Add(gp);
+
+                        p.ConstraintTypes!
+                            .Select(c => new GenericParameterConstraint(MiscUtils.ImportTypeInto(methodDefinition, c)))
+                            .ToList()
+                            .ForEach(gp.Constraints.Add);
+                    });
+
                 methodDefinition.ReturnType = MiscUtils.ImportTypeInto(methodDefinition, methodReturnType);
-
+                
                 if (tokenAttribute != null)
                 {
                     CustomAttribute customTokenAttribute = new CustomAttribute(ilTypeDefinition.Module.ImportReference(tokenAttribute));
@@ -541,29 +565,6 @@ namespace Cpp2IL.Core
 
                     methodDefinition.CustomAttributes.Add(customAttribute);
                 }
-
-                //Handle generic parameters.
-                methodDef.GenericContainer?.GenericParameters.ToList()
-                    .ForEach(p =>
-                    {
-                        if (SharedState.GenericParamsByIndex.TryGetValue(p.Index, out var gp))
-                        {
-                            if (!methodDefinition.GenericParameters.Contains(gp))
-                                methodDefinition.GenericParameters.Add(gp);
-
-                            return;
-                        }
-
-                        gp = new GenericParameter(p.Name, methodDefinition).WithFlags(p.flags);
-
-                        if (!methodDefinition.GenericParameters.Contains(gp))
-                            methodDefinition.GenericParameters.Add(gp);
-
-                        p.ConstraintTypes!
-                            .Select(c => new GenericParameterConstraint(MiscUtils.ImportTypeInto(methodDefinition, c)))
-                            .ToList()
-                            .ForEach(gp.Constraints.Add);
-                    });
                 
                 if (methodDef.slot < ushort.MaxValue)
                     SharedState.VirtualMethodsBySlot[methodDef.slot] = methodDefinition;
