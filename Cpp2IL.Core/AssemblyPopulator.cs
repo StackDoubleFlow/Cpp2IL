@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -157,6 +157,86 @@ namespace Cpp2IL.Core
 
         private static void FixupExplicitOverridesInType(TypeDefinition ilTypeDefinition)
         {
+            // Fix up compiler generated enumerator types
+            if (ilTypeDefinition.Name.StartsWith("<"))
+            {
+                GenericInstanceType? enumeratorGenericType = null;
+                GenericInstanceType? enumerableGenericType = null;
+                TypeReference? enumeratorType = null;
+                TypeReference? enumerableType = null;
+                TypeReference? disposableType = null;
+                
+                foreach (var @interface in ilTypeDefinition.Interfaces)
+                {
+                    var type = @interface.InterfaceType;
+
+                    if (type.Namespace == "System.Collections.Generic")
+                    {
+                        switch (type.Name)
+                        {
+                            case "IEnumerator`1":
+                                enumeratorGenericType = (GenericInstanceType) type;
+                                break;
+                            case "IEnumerable`1":
+                                enumerableGenericType = (GenericInstanceType) type;
+                                break;
+                        }
+                    }
+                    else switch (type.FullName)
+                    {
+                        case "System.Collections.IEnumerator":
+                            enumeratorType = type;
+                            break;
+                        case "System.Collections.IEnumerable":
+                            enumerableType = type;
+                            break;
+                        case "System.IDisposable":
+                            disposableType = type;
+                            break;
+                    }
+                }
+
+                foreach (var methodDef in ilTypeDefinition.Methods)
+                {
+                    void AddOverride(TypeReference baseType, string baseMethodName)
+                    {
+                        var baseMethod = baseType.Resolve().Methods.Single(method => method.Name == baseMethodName);
+                        methodDef.Overrides.Add(ilTypeDefinition.Module.ImportReference(baseMethod));
+                    }
+                    
+                    void AddOverrideGeneric(GenericInstanceType baseType, string baseMethodName)
+                    {
+                        var baseMethod = baseType.Resolve().Methods.Single(method => method.Name == baseMethodName);
+                        var genericMethod = baseMethod.MakeMethodOnGenericType(baseType.GenericArguments.ToArray());
+                        methodDef.Overrides.Add(ilTypeDefinition.Module.ImportReference(baseMethod, ilTypeDefinition));
+                    }
+                    
+                    if (enumeratorType != null && (methodDef.Name.StartsWith("System.Collections.IEnumerator") ||
+                                                   methodDef.Name == "MoveNext"))
+                    {
+                        var baseMethodName = methodDef.Name[(methodDef.Name.LastIndexOf(".", StringComparison.Ordinal) + 1)..];
+                        AddOverride(enumeratorType, baseMethodName);
+                    } else if (disposableType != null && methodDef.Name == "System.IDisposable.Dispose")
+                        AddOverride(disposableType, "Dispose");
+                    else if (enumerableType != null && methodDef.Name == "System.Collections.IEnumerable.GetEnumerator")
+                        AddOverride(enumerableType, "GetEnumerator");
+                    else if (enumeratorGenericType != null &&
+                             methodDef.Name.StartsWith("System.Collections.Generic.IEnumerator"))
+                    {
+                        var baseMethodName = methodDef.Name[(methodDef.Name.LastIndexOf(".", StringComparison.Ordinal) + 1)..];
+                        AddOverrideGeneric(enumeratorGenericType, baseMethodName);
+                    }
+                    else if (enumerableGenericType != null &&
+                             methodDef.Name.StartsWith("System.Collections.Generic.IEnumerable"))
+                    {
+                        var baseMethodName = methodDef.Name[(methodDef.Name.LastIndexOf(".", StringComparison.Ordinal) + 1)..];
+                        AddOverrideGeneric(enumerableGenericType, baseMethodName);
+                    }
+                }
+
+                if (enumeratorGenericType != null) return;
+            }
+            
             //Fixup explicit Override (e.g. System.Collections.Generic.Dictionary`2's IDictionary.Add method) methods.
             foreach (var currentlyFixingUp in ilTypeDefinition.Methods)
             {
@@ -169,7 +249,7 @@ namespace Cpp2IL.Core
                     {
                         case "MoveNext":
                         {
-                            foreach (var type in ilTypeDefinition.Interfaces.Select(@interface => @interface.InterfaceType).Where(type => type.FullName is "System.Collections.IEnumerator" or "System.Runtime.CompilerServices.IAsyncStateMachine"))
+                            foreach (var type in ilTypeDefinition.Interfaces.Select(@interface => @interface.InterfaceType).Where(type => type.FullName is "System.Runtime.CompilerServices.IAsyncStateMachine"))
                             {
                                 currentlyFixingUp.Overrides.Add(ilTypeDefinition.Module.ImportReference(type.Resolve().FindMethod("MoveNext")));
                             }
